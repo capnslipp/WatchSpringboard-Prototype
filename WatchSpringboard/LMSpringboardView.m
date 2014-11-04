@@ -25,6 +25,7 @@
   // a few state variables
   NSUInteger _lastFocusedViewIndex;
   CGFloat _zoomScaleCache;
+  CGPoint _contentOffsetCache;
   CGAffineTransform _minTransform;
   // dirty when the view changes width/height
   BOOL _minimumZoomLevelIsDirty;
@@ -34,6 +35,8 @@
   
   BOOL _centerOnEndDrag;
   BOOL _centerOnEndDeccel;
+  
+  __strong UIImageView* _bgView;
 }
 
 @end
@@ -158,6 +161,7 @@
                                             minScale*scaleFactor, minScale*scaleFactor);
     i++;
   }
+  [self repositionBGView];
   
   [self setNeedsLayout];
   [UIView animateWithDuration:0.5 delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
@@ -166,6 +170,8 @@
       view.alpha = 1;
     }
     [self layoutSubviews];
+	
+	[self repositionBGViewScaled:0.5];
   } completion:nil];
 }
 
@@ -215,6 +221,12 @@
   _zoomScaleCache = self.zoomScale;
   _minimumZoomLevelToLaunchApp = 0.4;
   
+	CGRect fullFrame = CGRectMake(0, 0, self.frame.size.width, self.frame.size.height);
+	_bgView = [[UIImageView alloc] initWithFrame:fullFrame];
+	_bgView.image = [UIImage imageNamed:@"Wallpaper.png"];
+	_bgView.autoresizingMask = (UIViewAutoresizingFlexibleHeight | UIViewAutoresizingFlexibleWidth);
+	_bgView.layer.anchorPoint = CGPointMake(0.5, 0.5);
+	
   _touchView = [[UIView alloc] init];
   //_touchView.backgroundColor = [UIColor purpleColor];
   [self addSubview:_touchView];
@@ -235,6 +247,11 @@
   _doubleTapGesture = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(LM_didZoomGesture:)];
   _doubleTapGesture.numberOfTapsRequired = 1;
   [_contentView addGestureRecognizer:_doubleTapGesture];
+}
+
+- (void)didMoveToSuperview
+{
+	[self.superview insertSubview:_bgView belowSubview:self];
 }
 
 - (CGPoint)LM_pointInSelfToContent:(CGPoint)point
@@ -544,10 +561,40 @@
   return _contentView;
 }
 
+- (void)repositionBGView {
+	[self repositionBGViewScaled:1.0];
+}
+- (void)repositionBGViewScaled:(CGFloat)scaleMod
+{
+	const CGFloat kScaleMultiplier = 3.0;
+	const CGFloat kTranslateMultiplier = -0.1;
+	
+	CGFloat scale = _zoomScaleCache * scaleMod;
+	if (scale <= 0.5)
+		scale = 1.0 / (20.0 * (-scale + 0.5) + 6) + 0.333; // horizontal asymptote function so that as the `scale` drops below 0.5 it'll curve to where it approaches 0.333 but never reaches it
+	
+	CGAffineTransform transform = CGAffineTransformIdentity;
+	transform = CGAffineTransformScale(transform,
+		scale * kScaleMultiplier,
+		scale * kScaleMultiplier
+	);
+	transform = CGAffineTransformTranslate(transform,
+		_contentOffsetCache.x * kTranslateMultiplier,
+		_contentOffsetCache.y * kTranslateMultiplier
+	);
+	_bgView.transform = transform;
+}
+
 - (void)scrollViewDidZoom:(UIScrollView *)scrollView
 {
   _zoomScaleCache = self.zoomScale;
   [self LM_centerViewIfSmaller];
+}
+
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView
+{
+	_contentOffsetCache = self.contentOffset;
+	[self repositionBGView];
 }
 
 #pragma mark - UIView
@@ -642,6 +689,7 @@
   }
   
   _zoomScaleCache = self.zoomScale;
+  _contentOffsetCache = self.contentOffset;
   
   _touchView.bounds = CGRectMake(0, 0, (_contentSizeUnscaled.width-_contentSizeExtra.width)*_zoomScaleCache, (_contentSizeUnscaled.height-_contentSizeExtra.height)*_zoomScaleCache);
   _touchView.center = CGPointMake(_contentSizeUnscaled.width*0.5*_zoomScaleCache, _contentSizeUnscaled.height*0.5*_zoomScaleCache);
